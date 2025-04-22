@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+env/
+venv/
+ENV/
+.venv/
+.env/
+
+# dotenv secrets
+*.env
+
+# PyInstaller
+*.spec
+dist/
+build/
+
+# Logs and database
+*.log
+*.sqlite3
+
+# VSCode settings
+.vscode/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# MacOS/Windows system files
+.DS_Store
+Thumbs.db
