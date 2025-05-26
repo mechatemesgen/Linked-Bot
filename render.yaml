@@ -1,6 +1,7 @@
 services:
   - type: web
     name: telegram-linkedin-bot
+    env: python
     runtime: python
     repo: https://github.com/mechatemesgen/Linked-Bot
     branch: main
@@ -9,3 +10,5 @@ services:
     envVars:
       - key: BOT_TOKEN
         sync: false
+      - key: WEBHOOK_URL
+        value: https://linked-bot.onrender.com/webhook

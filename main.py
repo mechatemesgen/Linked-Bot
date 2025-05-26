@@ -13,6 +13,9 @@ from telegram.error import BadRequest
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+from flask import Flask, request
+from telegram import Bot
+from telegram.ext import Dispatcher
 
 load_dotenv()
 
@@ -875,21 +878,26 @@ def invite_friend(update: Update, context: CallbackContext) -> int:
 # ------------------------- MAIN FUNCTION -------------------------
 
 def main():
-    updater = Updater(os.getenv('TELEGRAM_BOT_TOKEN'), use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler('users', list_users, filters=Filters.user(user_id=ADMIN_CHAT_ID)))
-    
-    # Add admin messaging conversation
+    # Use Flask for webhook
+    app = Flask(__name__)
+    TOKEN = os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
+    WEBHOOK_URL = os.environ["WEBHOOK_URL"]
+    PORT = int(os.environ.get("PORT", 8443))
+
+    bot = Bot(token=TOKEN)
+    dispatcher = Dispatcher(bot, None, workers=4, use_context=True)
+
+    # Register handlers (same as before, but use dispatcher)
+    dispatcher.add_handler(CommandHandler('users', list_users, filters=Filters.user(user_id=ADMIN_CHAT_ID)))
     admin_msg_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(handle_admin_message_request, pattern=r'^message_\d+$')],
+        entry_points=[CallbackQueryHandler(handle_admin_message_request, pattern=r'^message_\\d+$')],
         states={
             ADMIN_MESSAGE_INPUT: [MessageHandler(Filters.text & ~Filters.command, handle_admin_message_input)]
         },
         fallbacks=[CommandHandler('cancel', cancel_admin_message)],
         allow_reentry=True
     )
-    dp.add_handler(admin_msg_handler)
-    
+    dispatcher.add_handler(admin_msg_handler)
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -948,40 +956,40 @@ def main():
             ],
             
             USER_LIST_PAGE: [
-                CallbackQueryHandler(handle_user_pagination, pattern=r'^user_page_\d+$'),
-                CallbackQueryHandler(handle_user_selection, pattern=r'^select_user_\d+$')
+                CallbackQueryHandler(handle_user_pagination, pattern=r'^user_page_\\d+$'),
+                CallbackQueryHandler(handle_user_selection, pattern=r'^select_user_\\d+$')
             ]
         },
         fallbacks=[CommandHandler("cancel", go_home)],
         allow_reentry=True
     )
-    dp.add_handler(conv_handler)
-
-    # Register /getid command to help the admin retrieve their numeric chat id.
-    dp.add_handler(CommandHandler("getid", get_id))
-    dp.add_handler(CallbackQueryHandler(admin_approve_reject, pattern=r'^(approve|reject)_\d+$'))
-    dp.add_handler(CallbackQueryHandler(handle_user_pagination, pattern=r'^user_page_\d+$'))
-    dp.add_handler(CallbackQueryHandler(handle_user_selection, pattern=r'^select_user_\d+$'))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_reply))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_message))
-
-    dp.add_handler(CallbackQueryHandler(copy_link_handler, pattern="^copy_link$"))
-    dp.add_handler(CallbackQueryHandler(invite_friend, pattern="^invite_friend$"))
-    dp.add_handler(CommandHandler("start", start))
-    
-    # Modify existing /users command
-    dp.add_handler(CommandHandler('users', 
+    dispatcher.add_handler(conv_handler)
+    dispatcher.add_handler(CommandHandler("getid", get_id))
+    dispatcher.add_handler(CallbackQueryHandler(admin_approve_reject, pattern=r'^(approve|reject)_\\d+$'))
+    dispatcher.add_handler(CallbackQueryHandler(handle_user_pagination, pattern=r'^user_page_\\d+$'))
+    dispatcher.add_handler(CallbackQueryHandler(handle_user_selection, pattern=r'^select_user_\\d+$'))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_reply))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_message))
+    dispatcher.add_handler(CallbackQueryHandler(copy_link_handler, pattern="^copy_link$"))
+    dispatcher.add_handler(CallbackQueryHandler(invite_friend, pattern="^invite_friend$"))
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler('users', 
         lambda u, c: list_users(u, c, page=0), 
         filters=Filters.user(user_id=ADMIN_CHAT_ID)))
-    
-    # Update conversation states
-    conv_handler.states[USER_LIST_PAGE] = [
-        CallbackQueryHandler(handle_user_pagination, pattern=r'^user_page_\d+$'),
-        CallbackQueryHandler(handle_user_selection, pattern=r'^select_user_\d+$')
-    ]
-    
-    updater.start_polling()
-    updater.idle()
+    # ...existing code for updating conv_handler.states...
+
+    # Set webhook
+    bot.delete_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+
+    @app.route("/webhook", methods=["POST"])
+    def webhook():
+        if request.method == "POST":
+            update = Update.de_json(request.get_json(force=True), bot)
+            dispatcher.process_update(update)
+        return "ok"
+
+    app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == '__main__':
     init_db()
