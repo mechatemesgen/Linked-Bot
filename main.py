@@ -11,6 +11,10 @@ from telegram.ext import (
 )
 from telegram.error import BadRequest
 from datetime import datetime
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ------------------------- CONFIGURATION -------------------------
 
@@ -23,7 +27,7 @@ logger = logging.getLogger(__name__)
 DB_PATH = 'applications.db'
 
 # Replace with your admin's numeric chat id (retrieved via /getid command)
-ADMIN_CHAT_ID = 5184710593
+ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID'))
 
 # ------------------------- CONVERSATION STATES -------------------------
 
@@ -871,7 +875,7 @@ def invite_friend(update: Update, context: CallbackContext) -> int:
 # ------------------------- MAIN FUNCTION -------------------------
 
 def main():
-    updater = Updater("7816097673:AAExndn-fRY2BPsfJDI3nRfhk0eTCJBL15o", use_context=True)
+    updater = Updater(os.getenv('TELEGRAM_BOT_TOKEN'), use_context=True)
     dp = updater.dispatcher
     dp.add_handler(CommandHandler('users', list_users, filters=Filters.user(user_id=ADMIN_CHAT_ID)))
     
