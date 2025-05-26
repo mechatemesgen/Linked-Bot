@@ -982,6 +982,11 @@ def main():
     bot.delete_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
 
+    @app.route("/", methods=["GET", "HEAD"])
+    def home():
+        return "Am alive!!!", 200
+
+
     @app.route("/webhook", methods=["POST"])
     def webhook():
         if request.method == "POST":
