@@ -19,19 +19,6 @@ from telegram.ext import Dispatcher
 
 load_dotenv()
 
-# ------------------------- SUPABASE INITIALIZATION -------------------------
-from supabase import create_client, Client
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-def test_supabase_connection():
-    try:
-        response = supabase.table('applications').select('*').limit(1).execute()
-        print('Supabase connection successful:', response.data)
-    except Exception as e:
-        print('Supabase connection failed:', e)
-
 # ------------------------- CONFIGURATION -------------------------
 
 logging.basicConfig(
